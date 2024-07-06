@@ -66,8 +66,12 @@ int InternalKeyComparator::Compare(const Slice& akey, const Slice& bkey) const {
 void InternalKeyComparator::FindShortestSeparator(std::string* start,
                                                   const Slice& limit) const {
   // Attempt to shorten the user portion of the key
+  std::string user_start_orig;
   Slice user_start = ExtractUserKey(*start);
+  user_start_orig = user_start.ToString();
   Slice user_limit = ExtractUserKey(limit);
+  Slice result_key = Slice(start->data(), start->size());
+
   std::string tmp(user_start.data(), user_start.size());
   user_comparator_->FindShortestSeparator(&tmp, user_limit);
   if (tmp.size() < user_start.size() &&
@@ -79,7 +83,15 @@ void InternalKeyComparator::FindShortestSeparator(std::string* start,
     assert(this->Compare(*start, tmp) < 0);
     assert(this->Compare(tmp, limit) < 0);
     start->swap(tmp);
+    // Extract result_key from this function for debug purpose.
+    result_key.clear();
+    result_key = ExtractUserKey(*start);
   }
+
+  MYPRINT << "Separator_key: " << result_key.ToString()
+          << " last_key in prev data block: " << user_start_orig
+          << " start_key in the cur data block: " << user_limit.ToString()
+          << std::endl;
 }
 
 void InternalKeyComparator::FindShortSuccessor(std::string* key) const {

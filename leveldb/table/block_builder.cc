@@ -28,14 +28,25 @@
 
 #include "table/block_builder.h"
 
+#include "db/dbformat.h"
 #include <algorithm>
 #include <cassert>
 
 #include "leveldb/comparator.h"
 #include "leveldb/options.h"
+
 #include "util/coding.h"
 
+#define BLOCK_TAG "[" + BlockTypeName() + "] "
+
 namespace leveldb {
+std::string UserKey(const Slice& encoded_key_on_disk) {
+  ParsedInternalKey ikey;
+  std::string user_key;
+  ParseInternalKey(encoded_key_on_disk, &ikey);
+  AppendEscapedStringTo(&user_key, ikey.user_key);
+  return user_key;
+}
 
 BlockBuilder::BlockBuilder(const Options* options,
                            const std::string& block_type_name)
@@ -86,6 +97,7 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   } else {
     // Restart compression
     restarts_.push_back(buffer_.size());
+    MYPRINT << BLOCK_TAG << "Restart point: " << buffer_.size() << std::endl;
     counter_ = 0;
   }
   const size_t non_shared = key.size() - shared;
@@ -98,6 +110,30 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   // Add string delta to buffer_ followed by value
   buffer_.append(key.data() + shared, non_shared);
   buffer_.append(value.data(), value.size());
+
+  {
+    // This code block is for debug purpose only
+    std::string temp_buffer;
+    // Add "<shared><non_shared><value_size>" to buffer_
+    PutVarint32(&temp_buffer, shared);
+    PutVarint32(&temp_buffer, non_shared);
+    PutVarint32(&temp_buffer, value.size());
+
+    // Add string delta to buffer_ followed by value
+    temp_buffer.append(key.data() + shared, non_shared);
+    temp_buffer.append(value.data(), value.size());
+
+    std::string user_key_prev = UserKey(last_key_piece);
+    std::string user_key_cur = UserKey(key);
+
+    MYPRINT << BLOCK_TAG << "Prev key: "
+            << (user_key_prev.empty() ? "<Empty>" : user_key_prev)
+            << " Cur key: " << user_key_cur
+            << " Shared bytes with prev key: " << shared << std::endl;
+    MYPRINT << BLOCK_TAG << "Appending [" << ByteBufferToString(temp_buffer)
+            << "]"
+            << " to " << BlockTypeName() << std::endl;
+  }
 
   // Update state
   last_key_.resize(shared);

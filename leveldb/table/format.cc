@@ -18,6 +18,16 @@
 
 namespace leveldb {
 
+std::string BlockHandle::ToString() const {
+  std::string handle_str;
+  handle_str += "[";
+  handle_str += std::to_string(offset_);
+  handle_str += ":";
+  handle_str += std::to_string(size_);
+  handle_str += "]";
+  return handle_str;
+}
+
 void BlockHandle::EncodeTo(std::string* dst) const {
   // Sanity check that all fields have been set
   assert(offset_ != ~static_cast<uint64_t>(0));

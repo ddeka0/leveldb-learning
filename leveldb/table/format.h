@@ -38,6 +38,8 @@ class BlockHandle {
   void EncodeTo(std::string* dst) const;
   Status DecodeFrom(Slice* input);
 
+  std::string ToString() const;
+
  private:
   uint64_t offset_;
   uint64_t size_;

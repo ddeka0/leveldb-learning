@@ -101,7 +101,10 @@ Status TableBuilder::ChangeOptions(const Options& options) {
 void TableBuilder::Add(const Slice& key, const Slice& value) {
   Rep* r = rep_;
   assert(!r->closed);
-  if (!ok()) return;
+  if (!ok()) {
+    MYPRINT << "Returning.." << std::endl;
+    return;
+  }
   if (r->num_entries > 0) {
     assert(r->options.comparator->Compare(key, Slice(r->last_key)) > 0);
   }
@@ -109,6 +112,9 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   if (r->pending_index_entry) {
     assert(r->data_block.empty());
     r->options.comparator->FindShortestSeparator(&r->last_key, key);
+    MYPRINT << "Adding prev block handle " << r->pending_handle.ToString()
+            << " to " << r->index_block.BlockTypeName()
+            << " with index key: " << r->last_key << std::endl;
     std::string handle_encoding;
     r->pending_handle.EncodeTo(&handle_encoding);
     r->index_block.Add(r->last_key, Slice(handle_encoding));
@@ -123,7 +129,8 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
 
   r->last_key.assign(key.data(), key.size());
   r->num_entries++;
-  MYPRINT << "Adding key: " << key.ToString() << " to data block" << std::endl;
+  MYPRINT << "Adding key: " << key.ToString() << " to "
+          << r->data_block.BlockTypeName() << std::endl;
   r->data_block.Add(key, value);
 
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
@@ -213,8 +220,7 @@ void TableBuilder::WriteRawBlock(const Slice& block_contents,
   Rep* r = rep_;
   handle->set_offset(r->offset);
   handle->set_size(block_contents.size());
-  MYPRINT << "Block handle offset: " << r->offset
-          << " | size: " << block_contents.size() << std::endl;
+  MYPRINT << "Block handle: " << handle->ToString() << std::endl;
   r->status = r->file->Append(block_contents);
   if (r->status.ok()) {
     char trailer[kBlockTrailerSize];
@@ -274,6 +280,8 @@ Status TableBuilder::Finish() {
     if (r->pending_index_entry) {
       r->options.comparator->FindShortSuccessor(&r->last_key);
       std::string handle_encoding;
+      MYPRINT << "Adding prev block handle " << r->pending_handle.ToString()
+              << " to " << r->index_block.BlockTypeName() << std::endl;
       r->pending_handle.EncodeTo(&handle_encoding);
       r->index_block.Add(r->last_key, Slice(handle_encoding));
       r->pending_index_entry = false;

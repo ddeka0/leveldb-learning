@@ -40,12 +40,19 @@
 #define BLOCK_TAG "[" + BlockTypeName() + "] "
 
 namespace leveldb {
+
 std::string UserKey(const Slice& encoded_key_on_disk) {
   ParsedInternalKey ikey;
   std::string user_key;
   ParseInternalKey(encoded_key_on_disk, &ikey);
   AppendEscapedStringTo(&user_key, ikey.user_key);
   return user_key;
+}
+
+std::string CleanKey(const Slice& key) {
+  std::string clean_key;
+  AppendEscapedStringTo(&clean_key, key);
+  return clean_key;
 }
 
 BlockBuilder::BlockBuilder(const Options* options,

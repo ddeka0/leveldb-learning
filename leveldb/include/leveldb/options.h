@@ -145,6 +145,9 @@ struct LEVELDB_EXPORT Options {
   // Many applications will benefit from passing the result of
   // NewBloomFilterPolicy() here.
   const FilterPolicy* filter_policy = nullptr;
+
+  // Max bytes for Level-0 and Level-1 (10MB)
+  size_t level01_max_bytes = 10485760;
 };
 
 // Options that control read operations

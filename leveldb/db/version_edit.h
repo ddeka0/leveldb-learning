@@ -17,6 +17,15 @@ class VersionSet;
 
 struct FileMetaData {
   FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0) {}
+  FileMetaData(const FileMetaData& other) {
+    refs = other.refs;
+    allowed_seeks = other.allowed_seeks;
+    number = other.number;
+    file_size = other.file_size;
+    smallest = other.smallest;
+    largest = other.largest;
+    file_name = other.file_name;
+  }
 
   int refs;
   int allowed_seeks;  // Seeks allowed until compaction
@@ -24,6 +33,7 @@ struct FileMetaData {
   uint64_t file_size;    // File size in bytes
   InternalKey smallest;  // Smallest internal key served by table
   InternalKey largest;   // Largest internal key served by table
+  std::string file_name;
 };
 
 class VersionEdit {
@@ -61,12 +71,14 @@ class VersionEdit {
   // REQUIRES: This version has not been saved (see VersionSet::SaveTo)
   // REQUIRES: "smallest" and "largest" are smallest and largest keys in file
   void AddFile(int level, uint64_t file, uint64_t file_size,
-               const InternalKey& smallest, const InternalKey& largest) {
+               const InternalKey& smallest, const InternalKey& largest,
+               std::string file_name = "") {
     FileMetaData f;
     f.number = file;
     f.file_size = file_size;
     f.smallest = smallest;
     f.largest = largest;
+    f.file_name = file_name;
     new_files_.push_back(std::make_pair(level, f));
   }
 

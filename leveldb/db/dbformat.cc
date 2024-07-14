@@ -88,9 +88,9 @@ void InternalKeyComparator::FindShortestSeparator(std::string* start,
     result_key = ExtractUserKey(*start);
   }
 
-  MYPRINT << "Separator_key: " << result_key.ToString()
+  MYPRINT << "Separator_key: " << EscapeString(result_key)
           << " last_key in prev data block: " << user_start_orig
-          << " start_key in the cur data block: " << user_limit.ToString()
+          << " start_key in the cur data block: " << EscapeString(user_limit)
           << std::endl;
 }
 

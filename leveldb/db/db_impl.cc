@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <numeric>
 #include <set>
 #include <string>
 #include <vector>
@@ -59,6 +60,7 @@ struct DBImpl::CompactionState {
     uint64_t number;
     uint64_t file_size;
     InternalKey smallest, largest;
+    std::string file_name;
   };
 
   Output* current_output() { return &outputs[outputs.size() - 1]; }
@@ -541,7 +543,7 @@ Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
       level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
     }
     edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
-                  meta.largest);
+                  meta.largest, meta.file_name);
   }
 
   CompactionStats stats;
@@ -671,11 +673,19 @@ void DBImpl::MaybeScheduleCompaction() {
     // Already scheduled
   } else if (shutting_down_.load(std::memory_order_acquire)) {
     // DB is being deleted; no more background compactions
+    MYPRINT << "No compaction work to be done for now (reason: db deleted)"
+            << std::endl;
   } else if (!bg_error_.ok()) {
     // Already got an error; no more changes
+    MYPRINT
+        << "No compaction work to be done for now (reason: background error)"
+        << std::endl;
   } else if (imm_ == nullptr && manual_compaction_ == nullptr &&
              !versions_->NeedsCompaction()) {
     // No work to be done
+    MYPRINT << "No compaction work to be done for now (reason: compaction not "
+               "needed)"
+            << std::endl;
   } else {
     background_compaction_scheduled_ = true;
     env_->Schedule(&DBImpl::BGWork, this);
@@ -691,8 +701,13 @@ void DBImpl::BackgroundCall() {
   assert(background_compaction_scheduled_);
   if (shutting_down_.load(std::memory_order_acquire)) {
     // No more background work when shutting down.
+    MYPRINT << "No compaction work to be done for now (reason: db deleted)"
+            << std::endl;
   } else if (!bg_error_.ok()) {
     // No more background work after a background error.
+    MYPRINT
+        << "No compaction work to be done for now (reason: background error)"
+        << std::endl;
   } else {
     BackgroundCompaction();
   }
@@ -701,16 +716,17 @@ void DBImpl::BackgroundCall() {
 
   // Previous compaction may have produced too many files in a level,
   // so reschedule another compaction if needed.
+  MYPRINT << "Try to schedule another compaction..." << std::endl;
   MaybeScheduleCompaction();
   background_work_finished_signal_.SignalAll();
 }
 
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
-  MYPRINT << "Starting Background Compaction" << std::endl;
-  MYPRINT << "Before compaction: Current version status: "
-          << versions_->current()->DebugString() << std::endl;
   if (imm_ != nullptr) {
+    MYPRINT << "Starting Background memtable compaction" << std::endl;
+    MYPRINT << "Before compaction: Current version status: \n"
+            << versions_->current()->DebugString() << std::endl;
     CompactMemTable();
     return;
   }
@@ -736,6 +752,9 @@ void DBImpl::BackgroundCompaction() {
 
   Status status;
   if (c == nullptr) {
+    MYPRINT << "No compaction work to be done for now (reason: compaction not "
+               "needed)"
+            << std::endl;
     // Nothing to do
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
@@ -773,7 +792,7 @@ void DBImpl::BackgroundCompaction() {
     Log(options_.info_log, "Compaction error: %s", status.ToString().c_str());
   }
 
-  MYPRINT << "After compaction: Current version status: "
+  MYPRINT << "After compaction: Current version status: \n"
           << versions_->current()->DebugString() << std::endl;
 
   if (is_manual) {
@@ -812,12 +831,15 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
   assert(compact != nullptr);
   assert(compact->builder == nullptr);
   uint64_t file_number;
+  std::string fname;
   {
     mutex_.Lock();
     file_number = versions_->NewFileNumber();
+    fname = TableFileName(dbname_, file_number);
     pending_outputs_.insert(file_number);
     CompactionState::Output out;
     out.number = file_number;
+    out.file_name = fname;
     out.smallest.Clear();
     out.largest.Clear();
     compact->outputs.push_back(out);
@@ -825,7 +847,6 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
   }
 
   // Make the output file
-  std::string fname = TableFileName(dbname_, file_number);
   Status s = env_->NewWritableFile(fname, &compact->outfile);
   if (s.ok()) {
     MYPRINT << "Created a new table file during compaction: " << fname
@@ -840,6 +861,7 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
   assert(compact != nullptr);
   assert(compact->outfile != nullptr);
   assert(compact->builder != nullptr);
+  std::string compacted_out_file_name = compact->outfile->FileName();
 
   const uint64_t output_number = compact->current_output()->number;
   assert(output_number != 0);
@@ -870,16 +892,17 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
 
   if (s.ok() && current_entries > 0) {
     // Verify that the table is usable
-    MYPRINT << "Calling NewIterator" << std::endl;
+    MYPRINT << "Verify that the new table " << compacted_out_file_name
+            << " is usable" << std::endl;
     Iterator* iter =
         table_cache_->NewIterator(ReadOptions(), output_number, current_bytes);
     s = iter->status();
     delete iter;
     if (s.ok()) {
-      MYPRINT << "Generated table file: " << output_number << " at level "
-              << compact->compaction->level() << std::endl;
+      MYPRINT << "Generated table file: " << compacted_out_file_name
+              << " at level " << compact->compaction->level() + 1 << std::endl;
       Log(options_.info_log, "Generated table #%llu@%d: %lld keys, %lld bytes",
-          (unsigned long long)output_number, compact->compaction->level(),
+          (unsigned long long)output_number, compact->compaction->level() + 1,
           (unsigned long long)current_entries,
           (unsigned long long)current_bytes);
     }
@@ -900,7 +923,8 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact) {
   for (size_t i = 0; i < compact->outputs.size(); i++) {
     const CompactionState::Output& out = compact->outputs[i];
     compact->compaction->edit()->AddFile(level + 1, out.number, out.file_size,
-                                         out.smallest, out.largest);
+                                         out.smallest, out.largest,
+                                         out.file_name);
   }
   return versions_->LogAndApply(compact->compaction->edit(), &mutex_);
 }
@@ -917,6 +941,35 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
           << compact->compaction->level() << "+"
           << compact->compaction->num_input_files(1) << "@"
           << compact->compaction->level() + 1 << std::endl;
+
+  auto& cur_level_files_to_compact = compact->compaction->input(0);
+  auto& nxt_level_files_to_compact = compact->compaction->input(1);
+
+  std::string str1 =
+      cur_level_files_to_compact.empty()
+          ? std::string()
+          : std::accumulate(
+                std::next(cur_level_files_to_compact.begin()),
+                cur_level_files_to_compact.end(),
+                ExtractFileName(cur_level_files_to_compact[0]->file_name),
+                [](const std::string& a, const FileMetaData* b) {
+                  return a + "," + ExtractFileName(b->file_name);
+                });
+
+  std::string str2 =
+      nxt_level_files_to_compact.empty()
+          ? std::string()
+          : std::accumulate(
+                std::next(nxt_level_files_to_compact.begin()),
+                nxt_level_files_to_compact.end(),
+                ExtractFileName(nxt_level_files_to_compact[0]->file_name),
+                [](const std::string& a, const FileMetaData* b) {
+                  return a + "," + ExtractFileName(b->file_name);
+                });
+
+  MYPRINT << "Compacting [" << str1 << "]@" << compact->compaction->level()
+          << "+[" << str2 << "]@" << compact->compaction->level() + 1
+          << std::endl;
 
   assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
   assert(compact->builder == nullptr);
@@ -1020,6 +1073,10 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       compact->current_output()->largest.DecodeFrom(key);
       compact->builder->Add(key, input->value());
 
+      MYPRINT << "Current compaction output file size: "
+              << compact->builder->FileSize()
+              << " and limit: " << compact->compaction->MaxOutputFileSize()
+              << std::endl;
       // Close output file if it is big enough
       if (compact->builder->FileSize() >=
           compact->compaction->MaxOutputFileSize()) {
@@ -1299,8 +1356,8 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     writers_.front()->cv.Signal();
   }
 
-  MYPRINT << "Current version status: " << versions_->current()->DebugString()
-          << std::endl;
+  MYPRINT << "Current version status: \n"
+          << versions_->current()->DebugString() << std::endl;
   return status;
 }
 
@@ -1361,8 +1418,8 @@ Status DBImpl::MakeRoomForWrite(bool force) {
   assert(!writers_.empty());
   bool allow_delay = !force;
   Status s;
-  MYPRINT << "mem_->ApproximateMemoryUsage() = "
-          << mem_->ApproximateMemoryUsage() << std::endl;
+  MYPRINT << "Memtable approx memory usage = " << mem_->ApproximateMemoryUsage()
+          << std::endl;
   while (true) {
     if (!bg_error_.ok()) {
       // Yield previous error
@@ -1402,7 +1459,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
           << "There is no more space in the current 1st mem table. Creating a "
              "new log file for the 2nd memtable with log number : "
           << new_log_number << std::endl;
-      MYPRINT << "mem_->ApproximateMemoryUsage() = "
+      MYPRINT << "Memtable approx memory usage = "
               << mem_->ApproximateMemoryUsage() << std::endl;
       WritableFile* lfile = nullptr;
       s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile);
@@ -1437,7 +1494,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       mem_ = new MemTable(internal_comparator_);
       mem_->Ref();
       force = false;  // Do not force another compaction if have room
-      MYPRINT << "Scheduling compaction ..." << std::endl;
+      MYPRINT << "Scheduling memtable compaction..." << std::endl;
       MaybeScheduleCompaction();
     }
   }
@@ -1581,7 +1638,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   } else {
     delete impl;
   }
-  MYPRINT << "Current version status: "
+  MYPRINT << "Current version status: \n"
           << impl->versions_->current()->DebugString() << std::endl;
   return s;
 }

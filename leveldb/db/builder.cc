@@ -24,6 +24,7 @@ Status BuildTable(const std::string& dbname, Env* env, const Options& options,
   iter->SeekToFirst();
 
   std::string fname = TableFileName(dbname, meta->number);
+  meta->file_name = fname;
   if (iter->Valid()) {
     WritableFile* file;
     s = env->NewWritableFile(fname, &file);
@@ -39,7 +40,7 @@ Status BuildTable(const std::string& dbname, Env* env, const Options& options,
     Slice key;
     for (; iter->Valid(); iter->Next()) {
       key = iter->key();
-      MYPRINT << "Adding key: " << key.ToString()
+      MYPRINT << "Adding key: " << EscapeString(key)
               << " to SSTable file: " << fname << std::endl;
       builder->Add(key, iter->value());
     }

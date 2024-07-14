@@ -103,12 +103,14 @@ class ThreadSafeLogger {
 
 // Function to extract file name from path
 std::string ExtractFileName(const std::string& filePath);
+std::string GetCurrentDateTime();
 
 #ifndef MYPRINT
-#define MYPRINT                                                                \
-  ThreadSafeLogger::getInstance()                                              \
-      << std::this_thread::get_id() << " " << ExtractFileName(__FILE__) << ":" \
-      << __FUNCTION__ << ":" << __LINE__ << " "
+#define MYPRINT                                                              \
+  ThreadSafeLogger::getInstance()                                            \
+      << GetCurrentDateTime() << " " << std::this_thread::get_id() << " "    \
+      << ExtractFileName(__FILE__) << ":" << __FUNCTION__ << ":" << __LINE__ \
+      << " "
 #endif
 
 namespace leveldb {

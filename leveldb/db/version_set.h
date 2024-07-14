@@ -334,6 +334,10 @@ class Compaction {
   // Return the ith input file at "level()+which" ("which" must be 0 or 1).
   FileMetaData* input(int which, int i) const { return inputs_[which][i]; }
 
+  const std::vector<FileMetaData*>& input(int which) const {
+    return inputs_[which];
+  }
+
   // Maximum size of files to build during this compaction.
   uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
 

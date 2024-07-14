@@ -45,9 +45,9 @@ static double MaxBytesForLevel(const Options* options, int level) {
   // the level-0 compaction threshold based on number of files.
 
   // Result for both level-0 and level-1
-  double result = 10. * 1048576.0;
+  double result = options->level01_max_bytes;
   while (level > 1) {
-    result *= 10;
+    result *= 5;
     level--;
   }
   return result;
@@ -495,6 +495,9 @@ int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key,
       level++;
     }
   }
+
+  MYPRINT << "Compacted memtable (a SSTable) will be placed in level: " << level
+          << std::endl;
   return level;
 }
 
@@ -554,6 +557,8 @@ std::string Version::DebugString() const {
     const std::vector<FileMetaData*>& files = files_[level];
     for (size_t i = 0; i < files.size(); i++) {
       r.push_back(' ');
+      r.append(ExtractFileName(files[i]->file_name));
+      r.push_back(':');
       AppendNumberTo(&r, files[i]->number);
       r.push_back(':');
       AppendNumberTo(&r, files[i]->file_size);
@@ -606,6 +611,7 @@ class VersionSet::Builder {
     for (int level = 0; level < config::kNumLevels; level++) {
       levels_[level].added_files = new FileSet(cmp);
     }
+    MYPRINT << "A new Version::Builder is created" << std::endl;
   }
 
   ~Builder() {
@@ -631,11 +637,14 @@ class VersionSet::Builder {
 
   // Apply all of the edits in *edit to the current state.
   void Apply(const VersionEdit* edit) {
+    MYPRINT << "Applying version edit to version builder" << std::endl;
     // Update compaction pointers
     for (size_t i = 0; i < edit->compact_pointers_.size(); i++) {
       const int level = edit->compact_pointers_[i].first;
       vset_->compact_pointer_[level] =
           edit->compact_pointers_[i].second.Encode().ToString();
+      MYPRINT << "Compact pointer at level " << level << " : "
+              << vset_->compact_pointer_[level] << std::endl;
     }
 
     // Delete files
@@ -643,6 +652,8 @@ class VersionSet::Builder {
       const int level = deleted_file_set_kvp.first;
       const uint64_t number = deleted_file_set_kvp.second;
       levels_[level].deleted_files.insert(number);
+      MYPRINT << "Deleted file number: " << number << " at level " << level
+              << std::endl;
     }
 
     // Add new files
@@ -669,11 +680,14 @@ class VersionSet::Builder {
 
       levels_[level].deleted_files.erase(f->number);
       levels_[level].added_files->insert(f);
+      MYPRINT << "Going to add file: " << f->file_name << " at level: " << level
+              << std::endl;
     }
   }
 
   // Save the current state in *v.
   void SaveTo(Version* v) {
+    MYPRINT << "Saving vesion edit to a new version" << std::endl;
     BySmallestKey cmp;
     cmp.internal_comparator = &vset_->icmp_;
     for (int level = 0; level < config::kNumLevels; level++) {
@@ -848,6 +862,8 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     AppendVersion(v);
     log_number_ = edit->log_number_;
     prev_log_number_ = edit->prev_log_number_;
+    MYPRINT << "Current version status: \n"
+            << current_->DebugString() << std::endl;
   } else {
     delete v;
     if (!new_manifest_file.empty()) {
@@ -1036,10 +1052,19 @@ void VersionSet::Finalize(Version* v) {
   // Precomputed best level for next compaction
   int best_level = -1;
   double best_score = -1;
+  uint64_t best_level_bytes = 0;
+  uint64_t level_bytes = 0;
 
   for (int level = 0; level < config::kNumLevels - 1; level++) {
     double score;
     if (level == 0) {
+      // Just to check the core for level-0 with file sizes
+      level_bytes = TotalFileSize(v->files_[level]);
+      score =
+          static_cast<double>(level_bytes) / MaxBytesForLevel(options_, level);
+      MYPRINT << "Compaction score(with file sizes): " << score
+              << " at level: " << level << " [" << score << " = " << level_bytes
+              << "/" << MaxBytesForLevel(options_, level) << "]" << std::endl;
       // We treat level-0 specially by bounding the number of files
       // instead of number of bytes for two reasons:
       //
@@ -1053,21 +1078,35 @@ void VersionSet::Finalize(Version* v) {
       // overwrites/deletions).
       score = v->files_[level].size() /
               static_cast<double>(config::kL0_CompactionTrigger);
+      MYPRINT << "Compaction score(with num files): " << score
+              << " at level: " << level << " [" << score << " = "
+              << v->files_[level].size() << "/"
+              << static_cast<double>(config::kL0_CompactionTrigger) << "]"
+              << std::endl;
+
     } else {
       // Compute the ratio of current size to size limit.
-      const uint64_t level_bytes = TotalFileSize(v->files_[level]);
+      level_bytes = TotalFileSize(v->files_[level]);
       score =
           static_cast<double>(level_bytes) / MaxBytesForLevel(options_, level);
+      MYPRINT << "Compaction score(with file sizes): " << score
+              << " at level: " << level << " [" << score << " = " << level_bytes
+              << "/" << MaxBytesForLevel(options_, level) << "]" << std::endl;
     }
 
     if (score > best_score) {
       best_level = level;
       best_score = score;
+      best_level_bytes = level_bytes;
     }
   }
 
   v->compaction_level_ = best_level;
   v->compaction_score_ = best_score;
+
+  MYPRINT << "Next best compaction level: " << best_level
+          << " and score: " << best_score << "(" << best_level_bytes << "/"
+          << MaxBytesForLevel(options_, best_level) << ")" << std::endl;
 }
 
 Status VersionSet::WriteSnapshot(log::Writer* log) {
@@ -1262,6 +1301,7 @@ Compaction* VersionSet::PickCompaction() {
   const bool size_compaction = (current_->compaction_score_ >= 1);
   const bool seek_compaction = (current_->file_to_compact_ != nullptr);
   if (size_compaction) {
+    MYPRINT << "Size compaction" << std::endl;
     level = current_->compaction_level_;
     assert(level >= 0);
     assert(level + 1 < config::kNumLevels);
@@ -1281,6 +1321,7 @@ Compaction* VersionSet::PickCompaction() {
       c->inputs_[0].push_back(current_->files_[level][0]);
     }
   } else if (seek_compaction) {
+    MYPRINT << "Seek compaction" << std::endl;
     level = current_->file_to_compact_level_;
     c = new Compaction(options_, level);
     c->inputs_[0].push_back(current_->file_to_compact_);

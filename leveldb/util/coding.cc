@@ -16,6 +16,25 @@ std::string ExtractFileName(const std::string& filePath) {
   return filePath;
 }
 
+// Function to get current date and time as a formatted string
+std::string GetCurrentDateTime() {
+  auto now = std::chrono::system_clock::now();
+  auto now_time = std::chrono::system_clock::to_time_t(now);
+
+  // Use localtime_s on Windows or localtime_r on POSIX systems for thread
+  // safety
+  std::tm now_tm;
+#ifdef _WIN32
+  localtime_s(&now_tm, &now_time);
+#else
+  localtime_r(&now_time, &now_tm);
+#endif
+
+  std::ostringstream oss;
+  oss << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S");
+  return oss.str();
+}
+
 namespace leveldb {
 
 std::string ByteBufferToString(const std::string& buffer) {

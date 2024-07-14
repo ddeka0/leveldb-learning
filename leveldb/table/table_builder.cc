@@ -18,6 +18,7 @@
 #include "table/format.h"
 #include "util/coding.h"
 #include "util/crc32c.h"
+#include "util/logging.h"
 
 const std::string kDataBlockStr = "DataBlock";
 const std::string kIndexBlockStr = "IndexBlock";
@@ -122,21 +123,20 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   }
 
   if (r->filter_block != nullptr) {
-    MYPRINT << "Adding key: " << key.ToString() << " to filter block"
+    MYPRINT << "Adding key: " << EscapeString(key) << " to filter block"
             << std::endl;
     r->filter_block->AddKey(key);
   }
 
   r->last_key.assign(key.data(), key.size());
   r->num_entries++;
-  MYPRINT << "Adding key: " << key.ToString() << " to "
+  MYPRINT << "Adding key: " << EscapeString(key) << " to "
           << r->data_block.BlockTypeName() << std::endl;
   r->data_block.Add(key, value);
 
   const size_t estimated_block_size = r->data_block.CurrentSizeEstimate();
   MYPRINT << "Current data block estimated size: " << estimated_block_size
-          << " and r->options.block_siz: " << r->options.block_size
-          << std::endl;
+          << " and options.block_size: " << r->options.block_size << std::endl;
   if (estimated_block_size >= r->options.block_size) {
     MYPRINT << "Flushing block. Current size:  " << estimated_block_size
             << " vs options.block_size: " << r->options.block_size << std::endl;

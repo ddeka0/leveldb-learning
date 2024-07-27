@@ -13,7 +13,8 @@ int main() {
     options.write_buffer_size = 512;
     options.block_size = 512;
     options.compression = leveldb::CompressionType::kNoCompression;
-    leveldb::Status status = leveldb::DB::Open(options, "/tmp/testdb-8", &db);
+    options.reuse_logs = true;
+    leveldb::Status status = leveldb::DB::Open(options, "/tmp/testdb-1", &db);
     if (!status.ok()) {
         std::cerr << "Unable to open database: " << status.ToString() << std::endl;
         return 1;
@@ -27,11 +28,11 @@ int main() {
         std::cout << "Value for key: abcd is: " << value << std::endl;
     }
 
-    status = db->Get(leveldb::ReadOptions(), "bifd", &value);
+    status = db->Get(leveldb::ReadOptions(), "dlzf", &value);
     if (!status.ok()) {
         std::cerr << "Key does not exits: " << status.ToString() << std::endl;
     }else {
-        std::cout << "Value for key: bifd is: " << value << std::endl;
+      std::cout << "Value for key: dlzf is: " << value << std::endl;
     }
 
     // Close the database

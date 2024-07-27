@@ -114,6 +114,8 @@ class Version {
   // Return a human readable string that describes this version's contents.
   std::string DebugString() const;
 
+  int GetVersionNumber() const { return this_version_number_; };
+
  private:
   friend class Compaction;
   friend class VersionSet;
@@ -128,7 +130,10 @@ class Version {
         file_to_compact_(nullptr),
         file_to_compact_level_(-1),
         compaction_score_(-1),
-        compaction_level_(-1) {}
+        compaction_level_(-1) {
+    this_version_number_ = version_number_;
+    version_number_++;
+  }
 
   Version(const Version&) = delete;
   Version& operator=(const Version&) = delete;
@@ -162,6 +167,10 @@ class Version {
   // are initialized by Finalize().
   double compaction_score_;
   int compaction_level_;
+
+  // This is just for debug purpose.
+  int this_version_number_ = 0;
+  static int version_number_;
 };
 
 class VersionSet {

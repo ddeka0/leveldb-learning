@@ -31,13 +31,14 @@ int main() {
     options.write_buffer_size = 512;
     options.block_size = 512;
     options.compression = leveldb::CompressionType::kNoCompression;
-    leveldb::Status status = leveldb::DB::Open(options, "/tmp/testdb-10", &db);
+    options.reuse_logs = true;
+    leveldb::Status status = leveldb::DB::Open(options, "/tmp/testdb-1", &db);
     if (!status.ok()) {
         std::cerr << "Unable to open database: " << status.ToString() << std::endl;
         return 1;
     }
 
-    int num_keys = 20;
+    int num_keys = 2;
     for (int i = 0; i < num_keys; ++i) {
         std::string key = generateRandomKey();
         std::string value = "Value_" + std::to_string(i);

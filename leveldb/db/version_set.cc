@@ -68,7 +68,7 @@ static int64_t TotalFileSize(const std::vector<FileMetaData*>& files) {
 
 Version::~Version() {
   assert(refs_ == 0);
-
+  MYPRINT << "Removing version: " << GetVersionNumber() << std::endl;
   // Remove from linked list
   prev_->next_ = next_;
   next_->prev_ = prev_;
@@ -281,6 +281,8 @@ static bool NewestFirst(FileMetaData* a, FileMetaData* b) {
   return a->number > b->number;
 }
 
+int Version::version_number_ = 0;
+
 void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
                                  bool (*func)(void*, int, FileMetaData*)) {
   const Comparator* ucmp = vset_->icmp_.user_comparator();
@@ -461,6 +463,8 @@ void Version::Unref() {
   assert(refs_ >= 1);
   --refs_;
   if (refs_ == 0) {
+    MYPRINT << "No reference to this version: " << GetVersionNumber()
+            << ", deleting ..." << std::endl;
     delete this;
   }
 }
@@ -611,7 +615,7 @@ class VersionSet::Builder {
     for (int level = 0; level < config::kNumLevels; level++) {
       levels_[level].added_files = new FileSet(cmp);
     }
-    MYPRINT << "A new Version::Builder is created" << std::endl;
+    MYPRINT << "A new VersionSet::Builder is created" << std::endl;
   }
 
   ~Builder() {
@@ -706,7 +710,7 @@ class VersionSet::Builder {
           MaybeAddFile(v, level, *base_iter);
         }
 
-        MaybeAddFile(v, level, added_file);
+        MaybeAddFile(v, level, added_file, false /* newly added file */);
       }
 
       // Add remaining base files
@@ -732,8 +736,14 @@ class VersionSet::Builder {
     }
   }
 
-  void MaybeAddFile(Version* v, int level, FileMetaData* f) {
+  void MaybeAddFile(Version* v, int level, FileMetaData* f, bool prev = true) {
+    std::string s1 = prev ? "Prev " : "New ";
+    std::string s2 = prev ? std::to_string(base_->GetVersionNumber())
+                          : std::to_string(v->GetVersionNumber());
+    std::string PrefixStr = s1 + "[version = " + s2 + "]" + " file: ";
     if (levels_[level].deleted_files.count(f->number) > 0) {
+      MYPRINT << PrefixStr << f->file_name
+              << " is deleted from level: " << level << std::endl;
       // File is deleted: do nothing
     } else {
       std::vector<FileMetaData*>* files = &v->files_[level];
@@ -744,6 +754,8 @@ class VersionSet::Builder {
       }
       f->refs++;
       files->push_back(f);
+      MYPRINT << PrefixStr << f->file_name << " added to level: " << level
+              << std::endl;
     }
   }
 };
@@ -780,8 +792,12 @@ void VersionSet::AppendVersion(Version* v) {
   assert(v->refs_ == 0);
   assert(v != current_);
   if (current_ != nullptr) {
+    MYPRINT << "Removing one reference from current version: "
+            << std::to_string(current_->GetVersionNumber()) << std::endl;
     current_->Unref();
   }
+  MYPRINT << "Appending new version: " << std::to_string(v->GetVersionNumber())
+          << " and setting it to current version" << std::endl;
   current_ = v;
   v->Ref();
 
